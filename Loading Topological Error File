@@ -1,0 +1,37 @@
+import arcpy, os
+
+gdb_path = r"E:\Sheltech October\Structure_Update_06102025.gdb (1)\Structure_Update_06102025.gdb"   # Adjust this path
+
+print(f"✅ Checking contents of: {gdb_path}\n")
+arcpy.env.workspace = gdb_path
+
+# Step 1: list datasets
+datasets = arcpy.ListDatasets()
+if datasets:
+    print("📁 Feature Datasets:")
+    for ds in datasets:
+        print(f"   • {ds}")
+else:
+    print("⚠️ No feature datasets found in root.")
+
+# Step 2: For each dataset, list everything inside
+for ds in datasets or []:
+    print(f"\n🔍 Scanning dataset: {ds}")
+    ds_path = os.path.join(gdb_path, ds)
+    arcpy.env.workspace = ds_path
+
+    fcs = arcpy.ListFeatureClasses() or []
+    tops = arcpy.ListDatasets(feature_type='topology') or []
+    
+    if fcs:
+        print("   Feature Classes:")
+        for fc in fcs:
+            print(f"     • {fc}")
+    if tops:
+        print("   Topologies:")
+        for t in tops:
+            print(f"     • {t}")
+    if not fcs and not tops:
+        print("   (No feature classes or topologies here.)")
+
+print("\n✅ Scan complete.")

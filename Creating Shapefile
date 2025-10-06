@@ -1,0 +1,32 @@
+import arcpy
+import os
+
+# === USER SETTINGS ===
+out_folder = r"E:\Sheltech October\Trial"       # Folder where shapefile will be saved
+shapefile_name = "Test_Structures.shp"          # Name of shapefile
+geometry_type = "POLYGON"                       # Options: "POINT", "POLYLINE", "POLYGON"
+spatial_ref = arcpy.SpatialReference(4326)      # WGS 1984 (EPSG:4326); use 32646 for UTM Zone 46N
+
+# === CREATE EMPTY SHAPEFILE ===
+out_path = os.path.join(out_folder, shapefile_name)
+arcpy.management.CreateFeatureclass(
+    out_path=out_folder,
+    out_name=shapefile_name,
+    geometry_type=geometry_type,
+    spatial_reference=spatial_ref
+)
+
+print(f"✅ Shapefile created successfully at: {out_path}")
+
+# === ADD FIELDS ===
+fields = [
+    ("Name", "TEXT"),
+    ("Height_m", "DOUBLE"),
+    ("UseType", "TEXT")
+]
+
+for field_name, field_type in fields:
+    arcpy.management.AddField(out_path, field_name, field_type)
+    print(f"Added field: {field_name} ({field_type})")
+
+print("✅ All fields added successfully!")

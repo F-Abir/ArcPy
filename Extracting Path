@@ -1,0 +1,46 @@
+import arcpy, os
+
+# === PATH TO YOUR GEODATABASE ===
+gdb_path = r"E:\Sheltech October\Structure_Update_06102025.gdb (1)\Structure_Update_06102025.gdb"
+
+print(f"✅ Checking contents of: {gdb_path}\n")
+arcpy.env.workspace = gdb_path
+
+# === STEP 1: LIST FEATURE DATASETS ===
+datasets = arcpy.ListDatasets()
+if datasets:
+    print("📁 Feature Datasets:")
+    for ds in datasets:
+        ds_path = os.path.join(gdb_path, ds)
+        print(f"   • {ds}  -->  {ds_path}")
+else:
+    print("⚠️ No feature datasets found in root.")
+    ds_path = gdb_path  # in case there are root feature classes
+
+# === STEP 2: LIST FEATURE CLASSES & TOPOLOGIES INSIDE EACH DATASET ===
+for ds in datasets or ["(root)"]:
+    if ds == "(root)":
+        ds_path = gdb_path
+    else:
+        ds_path = os.path.join(gdb_path, ds)
+
+    print(f"\n🔍 Scanning dataset: {ds}")
+    arcpy.env.workspace = ds_path
+
+    fcs = arcpy.ListFeatureClasses() or []
+    tops = arcpy.ListDatasets(feature_type='topology') or []
+
+    if fcs:
+        print("   Feature Classes:")
+        for fc in fcs:
+            fc_path = os.path.join(ds_path, fc)
+            print(f"     • {fc}  -->  {fc_path}")
+    if tops:
+        print("   Topologies:")
+        for t in tops:
+            t_path = os.path.join(ds_path, t)
+            print(f"     • {t}  -->  {t_path}")
+    if not fcs and not tops:
+        print("   (No feature classes or topologies here.)")
+
+print("\n✅ Scan complete.")

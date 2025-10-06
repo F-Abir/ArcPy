@@ -1,0 +1,111 @@
+import arcpy, os
+
+# === USER INPUTS ===
+gdb_path = r"E:\Sheltech October\Trial\Trial.gdb"
+dataset = "Try"
+main_fc = "Structure"
+topology_name = "Try_Topology"
+fixed_output = "Structure_Fixed"
+
+# === DERIVED PATHS ===
+dataset_path = os.path.join(gdb_path, dataset)
+main_fc_path = os.path.join(dataset_path, main_fc)
+topology_path = os.path.join(dataset_path, topology_name)
+errors_fc_name = "Topology_Errors"
+errors_fc_path = os.path.join(gdb_path, errors_fc_name)
+fixed_fc_path = os.path.join(dataset_path, fixed_output)
+
+# === CLEAR LOCKS & ENVIRONMENT SETTINGS ===
+arcpy.env.workspace = dataset_path
+arcpy.env.overwriteOutput = True
+arcpy.env.addOutputsToMap = False
+arcpy.management.ClearWorkspaceCache()
+print("🔧 Workspace cache cleared and overwrite mode enabled.\n")
+
+# === STEP 1: VALIDATE TOPOLOGY ===
+print("🔍 Validating topology...")
+arcpy.management.ValidateTopology(topology_path)
+print("✅ Topology validated successfully.\n")
+
+# === STEP 2: EXPORT TOPOLOGY ERRORS ===
+print("📤 Exporting topology errors...")
+arcpy.management.ExportTopologyErrors(topology_path, gdb_path, errors_fc_name)
+error_poly = f"{errors_fc_path}_poly"
+print(f"✅ Exported topology errors to: {error_poly}\n")
+
+# === STEP 3: PREPARE WORKING COPY ===
+print("🧩 Preparing working feature class...")
+if arcpy.Exists(fixed_fc_path):
+    print(f"⚠️ Deleting existing '{fixed_output}' to avoid schema lock...")
+    arcpy.management.Delete(fixed_fc_path)
+
+arcpy.management.CopyFeatures(main_fc_path, fixed_fc_path)
+print(f"✅ Working copy created: {fixed_fc_path}\n")
+
+# Add area field if missing
+if "Area" not in [f.name for f in arcpy.ListFields(fixed_fc_path)]:
+    arcpy.management.AddField(fixed_fc_path, "Area", "DOUBLE")
+arcpy.management.CalculateGeometryAttributes(fixed_fc_path, [["Area", "AREA"]])
+
+# === STEP 4: FIX OVERLAPS ===
+print("🧮 Fixing overlaps — assigning shared areas to largest polygons only...")
+
+arcpy.management.MakeFeatureLayer(fixed_fc_path, "main_layer")
+arcpy.management.MakeFeatureLayer(error_poly, "error_layer")
+
+count = 0
+with arcpy.da.SearchCursor("error_layer", ["SHAPE@"]) as error_cursor:
+    for (err_shape,) in error_cursor:
+        # Skip if invalid or empty
+        if not err_shape or (hasattr(err_shape, "isEmpty") and err_shape.isEmpty):
+            continue
+
+        # Select polygons intersecting this error polygon
+        arcpy.management.SelectLayerByLocation("main_layer", "INTERSECT", err_shape)
+        neighbors = [(oid, area, shape)
+                     for oid, area, shape in arcpy.da.SearchCursor("main_layer", ["OID@", "Area", "SHAPE@"])]
+
+        if len(neighbors) < 2:
+            continue  # need at least two overlapping polygons
+
+        # Identify largest polygon
+        largest_oid, largest_area, largest_shape = max(neighbors, key=lambda x: x[1])
+        smaller_polygons = [n for n in neighbors if n[0] != largest_oid]
+
+        # Compute overlap geometry
+        overlap = None
+        for oid, area, shape in smaller_polygons:
+            inter = shape.intersect(largest_shape, 4)  # 4 = polygon geometry
+            if inter and (not hasattr(inter, "isEmpty") or not inter.isEmpty):
+                overlap = inter if overlap is None else overlap.union(inter)
+
+        # If no valid overlap found
+        if not overlap or (hasattr(overlap, "isEmpty") and overlap.isEmpty):
+            continue
+
+        # Subtract overlap from smaller polygons
+        for oid, area, shape in smaller_polygons:
+            new_shape = shape.difference(overlap)
+            with arcpy.da.UpdateCursor("main_layer", ["OID@", "SHAPE@"], f"OBJECTID = {oid}") as uc:
+                for r in uc:
+                    r[1] = new_shape
+                    uc.updateRow(r)
+
+        # Add overlap to largest polygon
+        new_largest = largest_shape.union(overlap)
+        with arcpy.da.UpdateCursor("main_layer", ["OID@", "SHAPE@"], f"OBJECTID = {largest_oid}") as uc:
+            for r in uc:
+                r[1] = new_largest
+                uc.updateRow(r)
+
+        count += 1
+        if count % 10 == 0:
+            print(f"   ...processed {count} overlap polygons")
+
+print(f"\n✅ Overlap areas reassigned to largest polygons. Total processed: {count}")
+print(f"💾 Cleaned feature class saved as: {fixed_fc_path}\n")
+
+# === STEP 5: OPTIONAL — REVALIDATE TOPOLOGY ===
+print("🔁 Revalidating topology after fixes...")
+arcpy.management.ValidateTopology(topology_path)
+print("✅ Final topology validation complete. Process finished successfully.\n")

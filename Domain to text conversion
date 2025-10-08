@@ -1,0 +1,43 @@
+import arcpy
+import os
+
+# --- Feature class path ---
+fc = r"E:\3D\UTMIDP_UMPR2_Dhaka_Nawabganj_Pd Office.gdb\UTMIDP_UMPR2_Dhaka_Nawabganj_Pd Office.gdb\Road_CL_Exist_Nawabganj"  # 🔁 change this
+
+# --- Confirm feature class exists ---
+if not arcpy.Exists(fc):
+    raise ValueError(f"❌ Feature class not found: {fc}")
+
+# --- Find the .gdb path even if FC is inside a dataset ---
+gdb_path = fc
+while not gdb_path.lower().endswith(".gdb"):
+    gdb_path = os.path.dirname(gdb_path)
+
+print(f"📁 Geodatabase detected: {gdb_path}")
+
+# --- Load all domains from the GDB ---
+domains = {d.name: d.codedValues for d in arcpy.da.ListDomains(gdb_path)}
+
+# --- Process all fields with domains ---
+for field in arcpy.ListFields(fc):
+    if field.domain and field.domain in domains:
+        coded_field = field.name
+        domain_dict = domains[field.domain]
+
+        # Create new text field name (e.g., G_FieldName1)
+        new_field = f"G_{coded_field}1"
+        if new_field not in [f.name for f in arcpy.ListFields(fc)]:
+            arcpy.management.AddField(fc, new_field, "TEXT", field_length=100)
+            print(f"➕ Added new field: {new_field}")
+        else:
+            print(f"⚠️ Field {new_field} already exists. Updating values...")
+
+        # Fill with domain description
+        with arcpy.da.UpdateCursor(fc, [coded_field, new_field]) as cursor:
+            for row in cursor:
+                row[1] = domain_dict.get(row[0], None)
+                cursor.updateRow(row)
+
+        print(f"✅ Converted {coded_field} → {new_field}")
+
+print("🎉 All domain-coded fields converted successfully!")

@@ -1,0 +1,54 @@
+import arcpy
+import os
+
+# Set input parameters
+shapefile_path = r"E:\New Programming Trial\Boundary.shp"
+tif_folder = r"E:\New Programming Trial\LC09_L2SP_137044_20240301_20240305_02_T1"
+output_folder = r"E:\New Programming Trial\2024"
+
+# Create output folder if it doesn't exist
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
+    print(f"Created output folder: {output_folder}")
+
+# Set overwrite option
+arcpy.env.overwriteOutput = True
+
+# Get list of all TIF files in the folder
+tif_files = [f for f in os.listdir(tif_folder) if f.lower().endswith('.tif') or f.lower().endswith('.tiff')]
+
+if not tif_files:
+    print("No TIF files found in the specified folder.")
+else:
+    print(f"Found {len(tif_files)} TIF file(s) to process.\n")
+    
+    # Process each TIF file
+    for i, tif_file in enumerate(tif_files, 1):
+        try:
+            # Full path to input TIF
+            input_raster = os.path.join(tif_folder, tif_file)
+            
+            # Output path (same name with _clipped suffix)
+            output_name = os.path.splitext(tif_file)[0] + "_clipped.tif"
+            output_raster = os.path.join(output_folder, output_name)
+            
+            print(f"[{i}/{len(tif_files)}] Processing: {tif_file}")
+            
+            # Clip raster by shapefile
+            arcpy.management.Clip(
+                in_raster=input_raster,
+                rectangle="#",
+                out_raster=output_raster,
+                in_template_dataset=shapefile_path,
+                nodata_value="",
+                clipping_geometry="ClippingGeometry",
+                maintain_clipping_extent="NO_MAINTAIN_EXTENT"
+            )
+            
+            print(f"    Successfully clipped to: {output_name}\n")
+            
+        except Exception as e:
+            print(f"    ERROR processing {tif_file}: {str(e)}\n")
+            continue
+
+print("Processing complete!")

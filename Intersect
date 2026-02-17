@@ -1,0 +1,176 @@
+"""
+intersect_gdb_with_shapefile.py
+--------------------------------
+Intersects every feature class inside Source GDB (Source 1)
+with a single shapefile (Source 2) and saves each result
+as a new feature class in an Output GDB.
+
+Usage
+-----
+1. Edit the four path variables in the CONFIG section below.
+2. Run:  python intersect_gdb_with_shapefile.py
+   (or open in ArcGIS Pro / ArcMap Python window)
+
+Output naming convention
+------------------------
+Each output feature class is named:
+    <original_fc_name>_intersect
+e.g. parcels  →  parcels_intersect
+"""
+
+import arcpy
+import os
+
+# =============================================================================
+# CONFIG  –  edit these four paths before running
+# =============================================================================
+
+# Source 1: geodatabase that contains one or more feature classes
+SOURCE_GDB = r"C:\Data\Source1.gdb"
+
+# Source 2: single shapefile used as the clip / intersect boundary
+SOURCE_SHP = r"C:\Data\Source2\boundary.shp"
+
+# Output: geodatabase where results will be stored
+#   – if it doesn't exist yet, the script creates it automatically
+OUTPUT_GDB = r"C:\Data\Output\Intersected.gdb"
+
+# Optional: restrict processing to a specific feature dataset inside SOURCE_GDB
+#   Set to "" (empty string) to process ALL feature classes at the root level
+#   Set to a name like "Transportation" to process only that feature dataset
+FEATURE_DATASET = ""
+
+# =============================================================================
+# HELPERS
+# =============================================================================
+
+def create_output_gdb(gdb_path: str) -> None:
+    """Create the output file geodatabase if it does not already exist."""
+    folder = os.path.dirname(gdb_path)
+    name   = os.path.basename(gdb_path)
+
+    if not arcpy.Exists(gdb_path):
+        arcpy.management.CreateFileGDB(folder, name)
+        print(f"[INFO]  Created output GDB: {gdb_path}")
+    else:
+        print(f"[INFO]  Output GDB already exists, using: {gdb_path}")
+
+
+def list_feature_classes(gdb_path: str, feature_dataset: str = "") -> list:
+    """
+    Return a list of full paths to every feature class in the GDB.
+
+    If feature_dataset is given, only feature classes inside that
+    dataset are returned.  Otherwise all root-level feature classes
+    (and those in every feature dataset) are returned.
+    """
+    arcpy.env.workspace = gdb_path
+    fc_paths = []
+
+    if feature_dataset:
+        # Single dataset
+        ds_path = os.path.join(gdb_path, feature_dataset)
+        arcpy.env.workspace = ds_path
+        for fc in arcpy.ListFeatureClasses():
+            fc_paths.append(os.path.join(ds_path, fc))
+    else:
+        # Root-level feature classes
+        for fc in arcpy.ListFeatureClasses():
+            fc_paths.append(os.path.join(gdb_path, fc))
+
+        # Feature classes inside every feature dataset
+        for ds in arcpy.ListDatasets(feature_type="Feature"):
+            ds_path = os.path.join(gdb_path, ds)
+            arcpy.env.workspace = ds_path
+            for fc in arcpy.ListFeatureClasses():
+                fc_paths.append(os.path.join(ds_path, fc))
+
+    return fc_paths
+
+
+def safe_output_name(fc_path: str, suffix: str = "_intersect") -> str:
+    """
+    Build a valid output feature class name from the input path.
+    Appends the suffix and strips any characters that are illegal
+    in geodatabase names.
+    """
+    base = os.path.splitext(os.path.basename(fc_path))[0]
+    name = arcpy.ValidateFieldName(base + suffix, OUTPUT_GDB)
+    return name
+
+
+# =============================================================================
+# MAIN
+# =============================================================================
+
+def main():
+    print("=" * 60)
+    print("  ArcPy Batch Intersect  –  GDB × Shapefile")
+    print("=" * 60)
+
+    # ── 1. Validate inputs ────────────────────────────────────────
+    if not arcpy.Exists(SOURCE_GDB):
+        raise FileNotFoundError(f"Source GDB not found: {SOURCE_GDB}")
+    if not arcpy.Exists(SOURCE_SHP):
+        raise FileNotFoundError(f"Source shapefile not found: {SOURCE_SHP}")
+
+    # ── 2. Ensure output GDB exists ───────────────────────────────
+    create_output_gdb(OUTPUT_GDB)
+
+    # ── 3. Collect feature classes from Source 1 ──────────────────
+    fc_list = list_feature_classes(SOURCE_GDB, FEATURE_DATASET)
+
+    if not fc_list:
+        print("[WARNING]  No feature classes found in the source GDB.")
+        return
+
+    print(f"\n[INFO]  Found {len(fc_list)} feature class(es) to process.\n")
+
+    # ── 4. Intersect each feature class with the shapefile ────────
+    success_count = 0
+    skip_count    = 0
+
+    for fc_path in fc_list:
+        fc_name     = os.path.basename(fc_path)
+        output_name = safe_output_name(fc_path)
+        output_path = os.path.join(OUTPUT_GDB, output_name)
+
+        print(f"  Processing : {fc_name}")
+        print(f"  → Output   : {output_name}")
+
+        # Skip if output already exists (change to True to overwrite)
+        if arcpy.Exists(output_path):
+            print(f"  [SKIP]  Output already exists. Delete it to rerun.\n")
+            skip_count += 1
+            continue
+
+        try:
+            # Intersect tool: in_features = [source_fc, clip_shp]
+            arcpy.analysis.Intersect(
+                in_features   = [fc_path, SOURCE_SHP],
+                out_feature_class = output_path,
+                join_attributes   = "ALL",   # keep all attributes from both inputs
+                output_type       = "INPUT"  # preserve the geometry type
+            )
+
+            # Report result count
+            result_count = int(arcpy.management.GetCount(output_path)[0])
+            print(f"  [OK]    {result_count} feature(s) written.\n")
+            success_count += 1
+
+        except arcpy.ExecuteError:
+            msgs = arcpy.GetMessages(2)
+            print(f"  [ERROR] ArcPy error on {fc_name}:\n{msgs}\n")
+
+        except Exception as e:
+            print(f"  [ERROR] Unexpected error on {fc_name}: {e}\n")
+
+    # ── 5. Summary ────────────────────────────────────────────────
+    print("=" * 60)
+    print(f"  Done.  {success_count} intersected | {skip_count} skipped")
+    print(f"  Results saved to: {OUTPUT_GDB}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
